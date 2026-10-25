@@ -5,6 +5,7 @@ flowchart LR
   end
   subgraph O["ORCHESTRATE"]
     SFN["Step Functions"]
+    LAM["trigger · isolate · snapshot · re-encrypt · analysis"]
   end
   subgraph A["ACQUIRE & CONTAIN"]
     LIVE["Live capture<br/>SSM · AVML"]
@@ -20,8 +21,8 @@ flowchart LR
   CLI --> SFN
   SFN --> LIVE
   LIVE --> S3
-  SFN --> QUAR
+  SFN -->|"wait 60s for capture"| QUAR
   SFN --> SNAP
   SNAP --> KMS
   KMS --> S3
-  S3 -.-> FV
+  S3 -.->|"memory dump for analysis"| FV

@@ -34,6 +34,7 @@ flowchart LR
   end
   subgraph O["ORCHESTRATE"]
     SFN["Step Functions"]
+    LAM["trigger · isolate · snapshot · re-encrypt · analysis"]
   end
   subgraph A["ACQUIRE & CONTAIN"]
     LIVE["Live capture"]
@@ -49,25 +50,39 @@ flowchart LR
   CLI --> SFN
   SFN --> LIVE
   LIVE --> S3
-  SFN --> QUAR
+  SFN -->|"wait 60s for capture"| QUAR
   SFN --> SNAP
   SNAP --> KMS
   KMS --> S3
-  S3 -.-> FV
+  S3 -.->|"memory dump for analysis"| FV
 ```
 
 </details>
 
 ### How it works, step by step
 
+Numbered 1–8 below match the pills on Figure 1, in the same order and the same four stage lanes.
+
+**TRIGGER**
+
 1. **GuardDuty → EventBridge.** A GuardDuty Instance finding (severity 7.0–8.9) matches rule `cloud-dfir-orchestrator-guardduty-finding` (`source=aws.guardduty` only — no Security Hub rule).
-2. **EventBridge or Analyst CLI starts Step Functions.** EventBridge calls `states:StartExecution` with the raw finding, or `trigger_investigation.py` starts `cloud-dfir-orchestrator-state-machine` with `{instance_id, reason, triggered_by, timestamp}`. The machine is linear (no Catch, Retry, or Parallel) and invokes five task Lambdas in order.
-3. **Live capture.** Lambda `trigger-triage` writes `evidence/{INC}/manifest.json` (SSE-KMS) and `ssm.send_command`s `CloudDFIR-LiveVolatileAcquisition`. On the EC2 host, in `/var/tmp`, SSM collects live triage then runs Microsoft AVML v0.14.0. Both archives upload to the S3 evidence vault. Step Functions does not join `CommandId`.
-4. **Wait 60 seconds.** `WaitDuringVolatileAcquisition` is a fixed wait. It does not poll SSM.
+2. **EventBridge or Analyst CLI → Step Functions.** EventBridge calls `states:StartExecution` with the raw finding, or `trigger_investigation.py` starts `cloud-dfir-orchestrator-state-machine` with `{instance_id, reason, triggered_by, timestamp}`.
+
+**ORCHESTRATE**
+
+The state machine is linear (no Catch, Retry, or Parallel). It invokes five Lambda tasks in order, shown under Step Functions: **trigger** (`trigger-triage`), **isolate** (`isolate-instance`), **snapshot** (`snapshot-ebs`), **re-encrypt** (`reencrypt-evidence`), **analysis** (`run-volatility`).
+
+**ACQUIRE & CONTAIN**
+
+3. **Live capture.** Lambda `trigger-triage` writes `evidence/{INC}/manifest.json` (SSE-KMS) and `ssm.send_command`s `CloudDFIR-LiveVolatileAcquisition`. On the EC2 host, in `/var/tmp`, SSM collects live triage then runs Microsoft AVML v0.14.0. Both archives **upload** to the S3 evidence vault. Step Functions does not join `CommandId`.
+4. **Wait 60s for capture.** `WaitDuringVolatileAcquisition` is a fixed 60-second wait. It does not poll SSM.
 5. **Quarantine host.** Lambda `isolate-instance` swaps every security group for the quarantine SG (0 ingress; egress TCP 443 to `0.0.0.0/0`), tries termination protection, and tags the instance (`DFIR_Status=Quarantined`, incident id, `DO_NOT_DELETE`).
 6. **Snapshot EBS.** Lambda `snapshot-ebs` calls `create_snapshot` for each attached volume. It does not wait for completion.
-7. **KMS CMK copy.** Lambda `reencrypt-evidence` waits on `snapshot_completed`, then `copy_snapshot` with `Encrypted=true` and `alias/dfir-forensics-vault-key`. The same CMK also encrypts S3 objects (SSE-KMS).
-8. **Fargate · Volatility (dashed, not deployed).** Lambda `run-volatility` returns `ANALYSIS_SCHEDULED`. Terraform leaves `ECS_CLUSTER` and `TASK_DEFINITION` empty, so Fargate never starts. If both were set, `analyze_memory.py` would read triage and memory from S3, run Volatility 3, and write `Forensic_Triage_Report.md` / `.json` back to the vault.
+
+**PRESERVE**
+
+7. **KMS CMK copy.** Lambda `reencrypt-evidence` waits on `snapshot_completed`, then `copy_snapshot` with `Encrypted=true` and `alias/dfir-forensics-vault-key`. The same CMK also encrypts S3 objects (**SSE-KMS**).
+8. **Fargate · Volatility.** Dashed path — **memory dump for analysis**. Lambda `run-volatility` returns `ANALYSIS_SCHEDULED`. Terraform leaves `ECS_CLUSTER` and `TASK_DEFINITION` empty, so Fargate never starts. If both were set, `analyze_memory.py` would read triage and memory from S3, run Volatility 3, and write `Forensic_Triage_Report.md` / `.json` back to the vault.
 
 ### Verified Incident Execution Report
 
