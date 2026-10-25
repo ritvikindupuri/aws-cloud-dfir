@@ -8,12 +8,14 @@ import sys
 import json
 import time
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import boto3
 
-def get_terraform_outputs():
-    """Attempt to parse outputs from terraform state or manual parameters."""
-    return {}
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 def main():
     parser = argparse.ArgumentParser(description="Autonomous Cloud DFIR Pipeline Trigger")
@@ -44,11 +46,11 @@ def main():
         "instance_id": args.instance_id,
         "reason": args.reason,
         "triggered_by": "Cloud-DFIR-CLI",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
     print("==============================================================================")
-    print("🚨 INITIATING AUTONOMOUS AWS CLOUD DFIR PIPELINE (RFC 3227 ORDER OF VOLATILITY)")
+    print("[!] INITIATING AUTONOMOUS AWS CLOUD DFIR PIPELINE (RFC 3227 ORDER OF VOLATILITY)")
     print("==============================================================================")
     print(f"Target Instance:      {args.instance_id}")
     print(f"Investigation Reason: {args.reason}")
@@ -84,11 +86,11 @@ def main():
                 ev_type = ev['type']
                 if "StateEntered" in ev_type:
                     state_name = ev.get('stateEnteredEventDetails', {}).get('name', 'Unknown')
-                    print(f"  👉 [STAGE ENTERED] : {state_name}")
+                    print(f"  [STAGE ENTERED] : {state_name}")
                 elif "ExecutionFailed" in ev_type:
-                    print(f"  ❌ [ERROR]         : {ev.get('executionFailedEventDetails', {})}")
+                    print(f"  [ERROR]         : {ev.get('executionFailedEventDetails', {})}")
                 elif "ExecutionSucceeded" in ev_type:
-                    print(f"  ✅ [SUCCESS]       : DFIR Pipeline Completed Successfully!")
+                    print(f"  [SUCCESS]       : DFIR Pipeline Completed Successfully!")
 
         if status in ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']:
             completed = True

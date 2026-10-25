@@ -304,7 +304,7 @@ def main():
     s3.upload_file(report_md_path, bucket, f"evidence/{incident_id}/reports/Forensic_Triage_Report.md")
     s3.upload_file(report_json_path, bucket, f"evidence/{incident_id}/reports/Forensic_Triage_Report.json")
 
-    print("[✓] DFIR Triage Report successfully compiled and uploaded.")
+    print("[+] DFIR Triage Report successfully compiled and uploaded.")
 
 if __name__ == "__main__":
     main()

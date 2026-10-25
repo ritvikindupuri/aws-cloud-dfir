@@ -83,7 +83,6 @@ resource "aws_lambda_function" "reencrypt_evidence" {
     variables = {
       FORENSICS_KMS_KEY_ARN = aws_kms_key.forensics_key.arn
       EVIDENCE_BUCKET       = aws_s3_bucket.evidence_vault.id
-      AWS_REGION            = var.aws_region
     }
   }
 }

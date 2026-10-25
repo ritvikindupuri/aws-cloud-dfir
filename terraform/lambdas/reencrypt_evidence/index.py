@@ -28,10 +28,18 @@ def handler(event, context):
         vol_id = snap['VolumeId']
         device = snap['DeviceName']
         
+        # Wait for source snapshot to complete before copying
+        current_region = boto3.session.Session().region_name or "us-east-2"
+        try:
+            waiter = ec2.get_waiter('snapshot_completed')
+            waiter.wait(SnapshotIds=[src_snap_id], WaiterConfig={'Delay': 3, 'MaxAttempts': 40})
+        except Exception as e:
+            print(f"Snapshot wait exception: {e}")
+
         # Copy and re-encrypt with dedicated forensics KMS key
         copy_res = ec2.copy_snapshot(
             SourceSnapshotId=src_snap_id,
-            SourceRegion=os.environ.get('AWS_REGION', 'us-east-1'),
+            SourceRegion=current_region,
             Description=f"Encrypted Forensics Vault Copy - {incident_id} - Vol {vol_id}",
             Encrypted=True,
             KmsKeyId=FORENSICS_KMS_KEY_ARN,
