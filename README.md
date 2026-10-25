@@ -65,7 +65,9 @@ flowchart TD
 5. Disk Preservation & KMS Re-Encryption: The third Lambda function creates point-in-time crash-consistent EBS snapshots of all block devices attached to the host. The fourth Lambda function waits for the snapshot to reach the completed state, then creates an encrypted copy using the dedicated Forensics KMS Customer Managed Key (`alias/dfir-forensics-vault-key`). This ensures that source account administrators or compromised credentials cannot delete or read the disk evidence.
 6. Forensics Worker & MITRE Mapping: The fifth Lambda invokes the Volatility 3 analysis worker. The worker analyzes process tables (`linux.pslist`), injected code segments (`linux.malfind`), and network sockets (`linux.sockstat`). Findings are correlated with live artifact records and mapped to corresponding MITRE ATT&CK techniques. The finalized `Forensic_Triage_Report.md` and `Forensic_Triage_Report.json` documents are deposited in the S3 evidence vault under the incident tracking identifier.
 
-### Production Execution Proof
+### Production Execution Proof & Live Incident Report
+
+A comprehensive, end-to-end case study of a verified incident response triage run is documented in the full [Forensic Incident Response Report: INC-20261025211310-8D9525](INCIDENT_REPORT.md), detailing execution timelines, memory capture telemetry, root cause analysis, and remediation actions.
 
 #### Step Functions Execution Workflow
 The following execution graph displays a completed end-to-end incident response run across all sequential containment and forensics phases:
@@ -234,7 +236,7 @@ To launch an immediate investigation on a compromised instance:
    ```bash
    aws s3 cp s3://<EVIDENCE_BUCKET_NAME>/evidence/<INCIDENT_ID>/reports/Forensic_Triage_Report.md .
    ```
-4. View the report containing extracted network sockets, unlinked processes, persistence mechanisms, and MITRE ATT&CK technique classifications.
+4. View the report containing extracted network sockets, unlinked processes, persistence mechanisms, and MITRE ATT&CK technique classifications. An authentic output report generated during live testing is available at [INCIDENT_REPORT.md](INCIDENT_REPORT.md).
 
 ### Step 6: Teardown Infrastructure
 
