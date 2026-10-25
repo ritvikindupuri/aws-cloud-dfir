@@ -77,8 +77,6 @@ flowchart TD
 aws-cloud-dfir/
 ├── README.md                          # Architectural specification & usage guide
 ├── trigger_investigation.py           # CLI tool to launch & monitor investigations in real-time
-├── attack_simulation/
-│   └── simulate_compromise.sh         # Authentic Linux compromise simulation script (No mock data)
 ├── analyzer/                          # Volatility 3 Forensics Worker
 │   ├── Dockerfile                     # Container with Volatility 3, YARA, Capstone, Dwarf2json
 │   ├── analyze_memory.py              # Automated analysis engine & MITRE ATT&CK mapper
@@ -92,6 +90,7 @@ aws-cloud-dfir/
     ├── kms.tf                         # Dedicated Forensics KMS CMK
     ├── s3_evidence_vault.tf           # S3 Bucket with WORM Object Lock & TLS enforcement
     ├── security_groups.tf             # Zero-Trust Quarantine Security Group
+    ├── eventbridge.tf                 # Real-time GuardDuty / Security Hub event trigger
     ├── ssm_documents.tf               # SSM document definition
     ├── iam.tf                         # Least-privilege IAM roles for Lambdas, SFN, and EC2
     ├── lambdas.tf                     # Lambda packaging and environment bindings
@@ -131,22 +130,13 @@ quarantine_security_group_id    = "sg-0123456789abcdef0"
 step_function_state_machine_arn = "arn:aws:states:us-east-1:195275680107:stateMachine:cloud-dfir-orchestrator-state-machine"
 ```
 
-### 3. Simulate Threat on Target Linux Host (No Mock Data)
+### 3. Production Event Ingest (Zero Simulation)
 
-Run the included attack simulation script on the target Linux instance:
+The pipeline is natively hooked to **Amazon GuardDuty** and **AWS Security Hub** via Amazon EventBridge (`terraform/eventbridge.tf`).
 
-```bash
-chmod +x attack_simulation/simulate_compromise.sh
-sudo ./attack_simulation/simulate_compromise.sh
-```
+When GuardDuty detects high-severity activity on an EC2 instance (e.g., `UnauthorizedAccess:EC2/TorIPCaller`, `Backdoor:EC2/XOR.DDoS`, `Trojan:EC2/DNSDataExfiltration`), EventBridge automatically routes the authentic finding JSON directly into the Step Functions State Machine without any simulation scaffolding.
 
-This script:
-1. Spawns an active payload listening on port `4444`.
-2. Deletes the payload binary from disk (`/proc/<pid>/exe (deleted)`), mimicking sophisticated memory-only malware.
-3. Installs persistence in user crontab.
-4. Generates authentic in-memory shell commands.
-
-### 4. Trigger Autonomous Cloud DFIR Investigation
+### 4. On-Demand / Incident Response CLI Trigger
 
 Trigger the investigation using the CLI tool:
 
