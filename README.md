@@ -1,222 +1,254 @@
-# AWS Autonomous Cloud DFIR & Memory Forensics Pipeline
+# AWS Cloud DFIR - Autonomous Cloud Digital Forensics and Incident Response Orchestrator
 
-[![AWS Step Functions](https://img.shields.io/badge/Orchestrator-AWS%20Step%20Functions-FF9900?logo=amazonaws)](https://aws.amazon.com/step-functions/)
-[![Volatility 3](https://img.shields.io/badge/Memory%20Forensics-Volatility%203-blue?logo=python)](https://github.com/volatilityfoundation/volatility3)
-[![Terraform](https://img.shields.io/badge/IaC-Terraform%201.7%2B-7B42BC?logo=terraform)](https://www.terraform.io/)
-[![Order of Volatility](https://img.shields.io/badge/Standard-RFC%203227-critical)]()
-[![Framework](https://img.shields.io/badge/Threat%20Mapping-MITRE%20ATT%26CK-red)]()
-
-An enterprise-grade, automated **Digital Forensics and Incident Response (DFIR)** pipeline for AWS. When an EC2 instance is flagged by GuardDuty, Security Hub, or an analyst, this engine autonomously preserves volatile state, extracts raw RAM, isolates the host via zero-trust security groups, takes consistent EBS snapshots, re-encrypts artifacts under a dedicated Forensics KMS Key, and executes **Volatility 3** against the memory dump to output an executive triage report mapped to MITRE ATT&CK®.
+AWS Cloud DFIR is an enterprise-grade digital forensics and incident response automation engine designed for Amazon Web Services environments. The platform autonomously captures volatile runtime artifacts, streams physical memory (RAM) directly to an immutable evidence vault, isolates compromised EC2 instances using zero-trust network quarantine, creates crash-consistent disk snapshots re-encrypted under a dedicated forensics Key Management Service (KMS) Customer Managed Key (CMK), and processes memory dumps through Volatility 3 to map indicators of compromise to the MITRE ATT&CK framework. The engine operates in strict compliance with RFC 3227 standards for evidence volatility, ensuring that memory and transient network states are preserved prior to host modification or disk snapshotting.
 
 ---
 
-## 🏗️ Architecture & Order of Volatility (RFC 3227)
+## Key Features
 
-Most cloud incident response tutorials naively snapshot EBS or terminate the instance immediately. This destroys volatile RAM, flushes network sockets, wipes in-memory malware execution, and stomps file access timestamps.
+* RFC 3227 Order of Volatility Enforcement: Acquires volatile system telemetry and physical memory before modifying instance network settings or snapshotting disks, preventing evidence destruction.
+* Direct Memory Streaming Without Disk Stomping: Executes statically linked Microsoft AVML (Acquire Volatile Memory for Linux) via AWS Systems Manager to compress and stream physical RAM directly to Amazon S3 without writing intermediate dump files to the target disk.
+* Zero-Trust Network Quarantine: Replaces instance security groups dynamically with an isolation group that revokes all inbound traffic and limits outbound traffic strictly to AWS Systems Manager endpoints over port 443, preserving command-and-control visibility while stopping lateral movement and data exfiltration.
+* Tamper-Proof S3 Evidence Vault (WORM Compliance): Stores forensic archives, memory dumps, and execution logs in an S3 bucket configured with Object Lock in Compliance mode, preventing deletion or modification even by root account credentials.
+* Dedicated Forensics KMS CMK Re-Encryption: Re-encrypts all EBS volume snapshots under an isolated Customer Managed Key with restricted key policies, ensuring compromised workload roles cannot decrypt, manipulate, or delete disk evidence.
+* Automated Volatility 3 Analysis Engine: Integrates automated memory inspection routines (including process listing, malfind code injection detection, and socket analysis) mapped directly to MITRE ATT&CK techniques with Markdown and JSON report outputs.
+* Native EventBridge Detection Hook: Connects natively to Amazon GuardDuty and AWS Security Hub to initiate automated containment and triage immediately upon high-severity alert generation.
 
-This architecture strictly enforces **RFC 3227 Order of Volatility**:
+---
+
+## System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Trigger ["1. Detection & Ingest"]
-        GD["AWS GuardDuty / SecHub Alert"] --> EB["Amazon EventBridge"]
-        Manual["Security Analyst CLI"] --> SFN["Step Functions State Machine"]
-        EB --> SFN
+    subgraph Ingestion ["1. Threat Detection & Ingestion"]
+        A["Amazon GuardDuty / AWS Security Hub"] -->|"Finding Payload"| B["Amazon EventBridge Rule"]
+        C["Security Analyst / CLI"] -->|"Manual JSON Trigger"| D["AWS Step Functions State Machine"]
+        B -->|"Auto Trigger"| D
     end
 
-    subgraph Phase1 ["2. Live Volatile Acquisition (Pre-Quarantine)"]
-        SFN --> L1["Lambda: Trigger Live Capture"]
-        L1 --> SSM["AWS Systems Manager (SSM)"]
-        SSM --> VState["Capture Active Network Sockets (ss, lsof)<br/>Process Tree (ps auxwwjf)<br/>Deleted Binaries in /proc<br/>Logged-in Users & Crontabs"]
-        SSM --> VMem["Stream Volatile RAM via AVML (LiME.gz)<br/>Direct to S3 Vault (No Disk Stomping)"]
-        VState --> S3V["S3 Evidence Vault (WORM / Object Lock)"]
-        VMem --> S3V
+    subgraph Acquisition ["2. RFC 3227 Volatile Acquisition"]
+        D -->|"Step 1: Invoke"| E["Lambda: Trigger Live Capture"]
+        E -->|"Execute Document"| F["AWS Systems Manager (SSM) Agent"]
+        F -->|"Harvest"| G["Live State: Sockets, Process Tree, Crontabs, Open Files"]
+        F -->|"Stream RAM"| H["AVML Memory Acquisition Engine"]
+        G -->|"Encrypted Upload"| I["Amazon S3 Evidence Vault (WORM Object Lock)"]
+        H -->|"Stream .lime.gz"| I
     end
 
-    subgraph Phase2 ["3. Host Containment & Disk Preservation"]
-        SFN --> L2["Lambda: Zero-Trust Quarantine"]
-        L2 --> QSG["Swap Security Groups to Quarantine SG<br/>(0 Ingress, Egress Only to Forensics SSM)"]
-        L2 --> TP["Set EC2 Termination Protection"]
-        SFN --> L3["Lambda: EBS Snapshotting"]
-        L3 --> Snap["Create Crash-Consistent EBS Snapshots<br/>Annotate with Chain-of-Custody Tags"]
-        SFN --> L4["Lambda: Forensics KMS Re-Encryption"]
-        L4 --> KMSSnap["Re-encrypt Snapshots with Isolated Forensics CMK"]
+    subgraph Containment ["3. Network Isolation & Disk Preservation"]
+        D -->|"Step 2: Quarantine"| J["Lambda: Enforce Network Quarantine"]
+        J -->|"Swap Security Groups"| K["Zero-Trust Quarantine Security Group (0 Ingress)"]
+        J -->|"Set Attribute"| L["Enable EC2 Termination Protection"]
+        D -->|"Step 3: Snapshot"| M["Lambda: Snapshot EBS Volumes"]
+        M -->|"ec2:CreateSnapshot"| N["Point-in-Time Crash-Consistent EBS Snapshot"]
+        D -->|"Step 4: Re-Encrypt"| O["Lambda: Re-Encrypt Forensics Vault"]
+        O -->|"ec2:CopySnapshot"| P["EBS Snapshot Re-Encrypted with Forensics KMS CMK"]
     end
 
-    subgraph Phase3 ["4. Automated Memory Forensics & Reporting"]
-        SFN --> L5["Lambda: Trigger Volatility 3 Worker"]
-        L5 --> ECS["Forensic Worker (Volatility 3 + YARA)"]
-        ECS --> Plugins["Run Volatility Plugins:<br/>- linux.pslist (Hidden Processes)<br/>- linux.malfind (RWX Injected Code)<br/>- linux.sockstat (C2 Sockets)<br/>- linux.bash (In-Memory Commands)"]
-        Plugins --> MITRE["Map IoCs to MITRE ATT&CK Matrix"]
-        MITRE --> Report["Generate Markdown & JSON Forensic Triage Report"]
-        Report --> S3V
+    subgraph Analysis ["4. Memory Forensics & Reporting"]
+        D -->|"Step 5: Analyze"| Q["Lambda: Trigger Volatility 3"]
+        Q -->|"Analyze Memory & Triage"| R["Volatility 3 Analysis Worker"]
+        R -->|"Correlate IoCs"| S["MITRE ATT&CK Mapping Engine"]
+        S -->|"Publish Reports"| T["Final Forensic Triage Report (Markdown & JSON)"]
+        T -->|"Store Report"| I
     end
 ```
 
----
+<p align="center"><b>Figure 1: RFC 3227 Autonomous Cloud Forensics & Incident Response Architecture</b></p>
 
-## 📸 Live AWS Verification & Production Proof
+### Architecture Flow Explanation
 
-### 1. Autonomous Step Functions Orchestrator (RFC 3227 Order of Volatility)
-Execution graph demonstrating autonomous execution through all containment and forensic preservation phases with 100% success:
+1. Ingestion Phase: An incident is initiated either automatically through Amazon EventBridge when Amazon GuardDuty or AWS Security Hub emits a high-severity finding (severity 7.0 to 8.9), or manually by an incident responder invoking the Step Functions state machine with a target instance identifier.
+2. Live Volatile State Collection: The state machine executes the initial AWS Lambda function, which dispatches the `CloudDFIR-LiveVolatileAcquisition` AWS Systems Manager document to the target instance. The script collects active listening sockets, established connections, running process hierarchies, kernel modules, logged-in sessions, and scheduled tasks. The archive and its cryptographic SHA-256 hash are uploaded to the S3 evidence bucket.
+3. Volatile RAM Acquisition: In the same execution phase, Microsoft AVML is executed directly in persistent scratch storage (`/var/tmp`) to read physical memory from `/proc/kcore`. The memory image is compressed on the fly into LiME format (`.lime.gz`), hashed, and uploaded to the S3 evidence vault via encrypted multipart upload.
+4. Zero-Trust Network Containment: Once volatile acquisition is completed, the second Lambda function strips all existing security groups from the instance and assigns the Quarantine Security Group. All inbound communication is blocked, and egress is restricted strictly to HTTPS communication with AWS Systems Manager endpoints. The instance is also tagged with `DFIR_Status=Quarantined` and termination protection is activated.
+5. Disk Preservation & KMS Re-Encryption: The third Lambda function creates point-in-time crash-consistent EBS snapshots of all block devices attached to the host. The fourth Lambda function waits for the snapshot to reach the completed state, then creates an encrypted copy using the dedicated Forensics KMS Customer Managed Key (`alias/dfir-forensics-vault-key`). This ensures that source account administrators or compromised credentials cannot delete or read the disk evidence.
+6. Forensics Worker & MITRE Mapping: The fifth Lambda invokes the Volatility 3 analysis worker. The worker analyzes process tables (`linux.pslist`), injected code segments (`linux.malfind`), and network sockets (`linux.sockstat`). Findings are correlated with live artifact records and mapped to corresponding MITRE ATT&CK techniques. The finalized `Forensic_Triage_Report.md` and `Forensic_Triage_Report.json` documents are deposited in the S3 evidence vault under the incident tracking identifier.
+
+### Production Execution Proof
+
+#### Step Functions Execution Workflow
+The following execution graph displays a completed end-to-end incident response run across all sequential containment and forensics phases:
+
 ![AWS Step Functions Execution Graph](docs/images/step_functions_execution.png)
 
-### 2. Zero-Trust Dynamic Quarantine & Chain of Custody Tagging
-Automated network quarantine swapping security groups and annotating host with forensic custody metadata:
+#### Zero-Trust Host Quarantine and Custody Tagging
+The following console view displays the target instance after containment, showing active quarantine tags and preserved network parameters:
+
 ![EC2 Instance Zero-Trust Quarantine Tags](docs/images/ec2_quarantine_tags.png)
 
-### 3. Crash-Consistent & Forensics KMS Re-Encrypted EBS Snapshots
-EBS disk snapshots created and re-encrypted under isolated Customer Managed Key (CMK):
+#### Forensics KMS Re-Encrypted EBS Snapshots
+The following console view displays the original crash-consistent snapshot alongside the re-encrypted forensics vault snapshot:
+
 ![EBS Snapshots and Encrypted Vault](docs/images/ebs_snapshots_vault.png)
 
 ---
 
-## 🔑 Key Engineering Capabilities
+## Tech Stack
 
-1. **Direct Memory Streaming (Zero Disk Stomping)**:
-   * Uses statically linked Microsoft AVML (Acquire Volatile Memory for Linux).
-   * Compresses volatile RAM (`.lime.gz`) on the fly and pipes it directly into the encrypted S3 evidence vault, preventing attacker anti-forensics triggers and preserving unallocated disk space.
-2. **Zero-Trust Network Isolation**:
-   * Instead of shutting down the instance (which loses volatile state) or disconnecting ENIs, it replaces instance security groups with a strictly scoped **Quarantine Security Group** (0 inbound, HTTPS outbound strictly restricted to SSM endpoints so control remains intact).
-3. **Forensics KMS CMK & S3 Object Lock (WORM Legal Hold)**:
-   * All evidence is re-encrypted using a dedicated Forensics Customer Managed Key (CMK) inaccessible to standard workload IAM roles.
-   * Evidence vault enforces S3 Object Lock in Compliance mode to guarantee tamper-proof chain of custody for regulatory and legal compliance.
-4. **Automated Volatility 3 Engine**:
-   * Analyzes memory dumps for code injection (`linux.malfind`), processes executing from unlinked binaries (`/proc/<pid>/exe (deleted)`), reverse shells, and unauthorized persistence.
-   * Outputs a structured **Forensic Triage Report** in Markdown and JSON.
-
----
-
-## 📂 Repository Structure
-
-```
-aws-cloud-dfir/
-├── README.md                          # Architectural specification & usage guide
-├── trigger_investigation.py           # CLI tool to launch & monitor investigations in real-time
-├── analyzer/                          # Volatility 3 Forensics Worker
-│   ├── Dockerfile                     # Container with Volatility 3, YARA, Capstone, Dwarf2json
-│   ├── analyze_memory.py              # Automated analysis engine & MITRE ATT&CK mapper
-│   └── requirements.txt
-├── ssm/
-│   └── live_volatile_acquisition.yaml # Multi-stage SSM document for live triage & AVML RAM dump
-└── terraform/                         # Production Infrastructure as Code
-    ├── main.tf                        # AWS Provider & data sources
-    ├── variables.tf                   # Deployment variables
-    ├── outputs.tf                     # S3 Vault, Step Function ARN, KMS ARN outputs
-    ├── kms.tf                         # Dedicated Forensics KMS CMK
-    ├── s3_evidence_vault.tf           # S3 Bucket with WORM Object Lock & TLS enforcement
-    ├── security_groups.tf             # Zero-Trust Quarantine Security Group
-    ├── eventbridge.tf                 # Real-time GuardDuty / Security Hub event trigger
-    ├── ssm_documents.tf               # SSM document definition
-    ├── iam.tf                         # Least-privilege IAM roles for Lambdas, SFN, and EC2
-    ├── lambdas.tf                     # Lambda packaging and environment bindings
-    ├── step_functions.tf              # AWS Step Functions State Machine definition
-    └── lambdas/
-        ├── trigger_triage/            # Event parser & SSM initiator
-        ├── isolate_instance/          # Network quarantine & termination lock
-        ├── snapshot_ebs/              # Point-in-time EBS snapshotting
-        ├── reencrypt_evidence/        # KMS re-encryption & manifest update
-        └── run_volatility/            # Forensic worker launcher
-```
+* Cloud Platform: Amazon Web Services (AWS)
+* Infrastructure as Code: Terraform 1.7+
+* Orchestration: AWS Step Functions (Amazon States Language)
+* Compute & Handlers: AWS Lambda (Python 3.11 runtime)
+* Agent & Host Automation: AWS Systems Manager (SSM Run Command)
+* Memory Acquisition: Microsoft AVML (Acquire Volatile Memory for Linux v0.14.0)
+* Forensics Analysis Engine: Volatility 3, YARA, Capstone Disassembly Engine
+* Threat Mapping: MITRE ATT&CK Matrix for Enterprise
+* Cryptography & Protection: AWS Key Management Service (KMS CMK), SHA-256 Checksums
+* Evidence Storage: Amazon Simple Storage Service (S3) with Object Lock (WORM compliance)
+* Threat Ingestion: Amazon EventBridge, Amazon GuardDuty, AWS Security Hub
 
 ---
 
-## 🚀 Quickstart & Deployment
+## Setup Instructions
 
 ### 1. Prerequisites
-* AWS CLI configured with valid credentials (`aws configure`)
-* Terraform v1.5+
-* Target EC2 instance attached to the provided instance profile: `cloud-dfir-orchestrator-target-ec2-profile`.
 
-### 2. Deploy Infrastructure via Terraform
+Ensure the following tools are installed and configured on your management machine:
+* AWS CLI v2 configured with administrator permissions:
+  ```bash
+  aws configure
+  ```
+* Terraform v1.5 or newer:
+  ```bash
+  terraform -version
+  ```
+* Python 3.10 or newer:
+  ```bash
+  python --version
+  ```
 
-```bash
-cd terraform/
-terraform init
-terraform plan
-terraform apply -auto-approve
-```
-
-Terraform outputs the state machine ARN, S3 evidence vault, and Quarantine Security Group ID:
-```text
-Outputs:
-evidence_vault_bucket           = "dfir-evidence-vault-195275680107-a8b2"
-forensics_kms_key_arn           = "arn:aws:kms:us-east-1:195275680107:key/..."
-quarantine_security_group_id    = "sg-0123456789abcdef0"
-step_function_state_machine_arn = "arn:aws:states:us-east-1:195275680107:stateMachine:cloud-dfir-orchestrator-state-machine"
-```
-
-### 3. Production Event Ingest (Zero Simulation)
-
-The pipeline is natively hooked to **Amazon GuardDuty** and **AWS Security Hub** via Amazon EventBridge (`terraform/eventbridge.tf`).
-
-When GuardDuty detects high-severity activity on an EC2 instance (e.g., `UnauthorizedAccess:EC2/TorIPCaller`, `Backdoor:EC2/XOR.DDoS`, `Trojan:EC2/DNSDataExfiltration`), EventBridge automatically routes the authentic finding JSON directly into the Step Functions State Machine without any simulation scaffolding.
-
-### 4. On-Demand / Incident Response CLI Trigger
-
-Trigger the investigation using the CLI tool:
+### 2. Clone Repository
 
 ```bash
-python trigger_investigation.py \
-  --instance-id i-0123456789abcdef0 \
-  --reason "GuardDuty: UnauthorizedAccess:EC2/TorIPCaller" \
-  --wait
+git clone https://github.com/ritvikindupuri/aws-cloud-dfir.git
+cd aws-cloud-dfir
 ```
 
-Live progress streaming in terminal:
-```text
-==============================================================================
-🚨 INITIATING AUTONOMOUS AWS CLOUD DFIR PIPELINE (RFC 3227 ORDER OF VOLATILITY)
-==============================================================================
-Target Instance:      i-0123456789abcdef0
-Investigation Reason: GuardDuty: UnauthorizedAccess:EC2/TorIPCaller
-Execution Name:       DFIR-i-0123456789abcdef0-1761421450
-------------------------------------------------------------------------------
-[+] Execution launched: arn:aws:states:us-east-1:...:execution:...
-[*] Streaming workflow stage progress...
-  👉 [STAGE ENTERED] : TriggerLiveCapture
-  👉 [STAGE ENTERED] : WaitDuringVolatileAcquisition
-  👉 [STAGE ENTERED] : EnforceNetworkQuarantine
-  👉 [STAGE ENTERED] : SnapshotEBSVolumes
-  👉 [STAGE ENTERED] : ReencryptForensicsVault
-  👉 [STAGE ENTERED] : TriggerForensicAnalysis
-  ✅ [SUCCESS]       : DFIR Pipeline Completed Successfully!
-------------------------------------------------------------------------------
-Final Pipeline Status: SUCCEEDED
-Incident Tracking ID: INC-20261025194512-B8E2A1
-Forensic Report S3:   s3://dfir-evidence-vault-.../evidence/INC-20261025194512-B8E2A1/reports/
-```
+### 3. Deploy Infrastructure via Terraform
+
+1. Navigate to the terraform directory:
+   ```bash
+   cd terraform
+   ```
+2. Initialize Terraform providers and backend modules:
+   ```bash
+   terraform init
+   ```
+3. Validate configuration syntax:
+   ```bash
+   terraform validate
+   ```
+4. Review the infrastructure execution plan:
+   ```bash
+   terraform plan -var="aws_region=us-east-2"
+   ```
+5. Apply the configuration to provision the S3 vault, KMS key, Lambdas, Step Functions state machine, and EventBridge rules:
+   ```bash
+   terraform apply -auto-approve -var="aws_region=us-east-2"
+   ```
+
+Terraform outputs will display the resource identifiers upon completion:
+* `evidence_vault_bucket`: The unique S3 bucket name created with Object Lock.
+* `forensics_kms_key_arn`: The ARN of the Customer Managed Key.
+* `step_function_state_machine_arn`: The ARN of the state machine.
+* `quarantine_security_group_id`: The security group ID used for isolation.
+* `monitored_ec2_instance_profile`: The IAM instance profile required on target hosts.
 
 ---
 
-## 📊 Sample Output: Forensic Triage Report
+## How to Use the App
 
-When the pipeline finishes, the report is compiled in Markdown and JSON inside the S3 vault:
+### Step 1: Attach the IAM Instance Profile to Monitored EC2 Hosts
 
-```markdown
-# AWS Cloud DFIR Forensic Investigation Report
-Incident ID: INC-20261025194512-B8E2A1
-Investigator: Automated Cloud DFIR Engine (Volatility 3 & AWS SSM)
-Status: CONTAINED & ANALYZED
+For any EC2 instance you wish to monitor with this platform, attach the instance profile provisioned by Terraform:
 
-## 1. MITRE ATT&CK® Threat Mapping
-| Technique ID | Technique Name | Tactic | Evidence Observed |
-| :--- | :--- | :--- | :--- |
-| `T1070.004` | Indicator Removal: File Deletion | **Defense Evasion** | Found 1 unlinked processes executing from deleted files (/tmp/backdoor_worker.py). |
-| `T1053.003` | Scheduled Task/Job: Cron | **Persistence** | Cron job entries detected: * * * * * /bin/bash -c 'sleep 5' # THREAT_INTEL_PERSISTENCE_BEACON |
-| `T1059.004` | Command & Scripting Interpreter | **Execution** | Observed interactive network connection to port 4444. |
+1. Open the Amazon EC2 Console.
+2. Select your target EC2 instance.
+3. Click Actions > Security > Modify IAM role.
+4. Select `cloud-dfir-orchestrator-target-ec2-profile` from the dropdown list.
+5. Click Update IAM role.
+6. Verify that the Amazon SSM Agent is active on the host:
+   ```bash
+   aws ssm describe-instance-information --region us-east-2 --filters "Key=InstanceIds,Values=<INSTANCE_ID>"
+   ```
 
-## 2. Volatility 3 Memory Forensics Analysis
-- Process Listing: PID 3819 [python3] verified running unlinked binary.
-- Injected Memory Segments: None detected outside payload space.
-- Chain of Custody: SHA-256 verified (e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855).
-```
+### Step 2: Trigger an Autonomous Forensic Investigation via CLI
 
----
+To launch an immediate investigation on a compromised instance:
 
-## 🛡️ Security & Compliance Standards Met
+1. Return to the root repository folder:
+   ```bash
+   cd ..
+   ```
+2. Execute the CLI trigger script with your target instance ID and region:
+   ```bash
+   python trigger_investigation.py --instance-id <TARGET_INSTANCE_ID> --region us-east-2 --reason "GuardDuty: UnauthorizedAccess:EC2/TorIPCaller - C2 Beaconing" --wait
+   ```
+3. Observe live workflow status updates directly in your terminal:
+   ```text
+   [!] INITIATING AUTONOMOUS AWS CLOUD DFIR PIPELINE (RFC 3227 ORDER OF VOLATILITY)
+   Target Instance:      i-0a948e25841670465
+   Investigation Reason: GuardDuty: UnauthorizedAccess:EC2/TorIPCaller - C2 Beaconing
+   State Machine ARN:    arn:aws:states:us-east-2:...:stateMachine:cloud-dfir-orchestrator-state-machine
+   [+] Execution launched: arn:aws:states:us-east-2:...
+   [*] Streaming workflow stage progress...
+     [STAGE ENTERED] : TriggerLiveCapture
+     [STAGE ENTERED] : WaitDuringVolatileAcquisition
+     [STAGE ENTERED] : EnforceNetworkQuarantine
+     [STAGE ENTERED] : SnapshotEBSVolumes
+     [STAGE ENTERED] : ReencryptForensicsVault
+     [STAGE ENTERED] : TriggerForensicAnalysis
+     [STAGE ENTERED] : ForensicInvestigationComplete
+     [SUCCESS]       : DFIR Pipeline Completed Successfully!
+   Incident Tracking ID: INC-20261025211310-8D9525
+   ```
 
-* **RFC 3227**: Guidelines for Evidence Collection and Archiving (Memory $\rightarrow$ Volatile State $\rightarrow$ Disk Snapshots).
-* **NIST SP 800-86**: Guide to Integrating Forensic Techniques into Incident Response.
-* **ISO/IEC 27037**: Guidelines for identification, collection, acquisition, and preservation of digital evidence.
-* **AWS Well-Architected Framework (Security Pillar)**: Automated incident response, principle of least privilege, defense-in-depth isolation.
+### Step 3: Verify Host Isolation in the AWS Console
+
+1. Navigate to the Amazon EC2 Console > Instances.
+2. Select the target instance.
+3. Click the Security tab: Verify that the Security Groups field displays only `cloud-dfir-orchestrator-quarantine-sg`.
+4. Click the Tags tab: Verify that `DFIR_Status` is set to `Quarantined`, and `DFIR_EvidencePreservation` is set to `DO_NOT_DELETE`.
+
+### Step 4: Inspect Forensic Snapshots in the EC2 Console
+
+1. Navigate to Amazon EC2 Console > Elastic Block Store > Snapshots.
+2. In the search bar, filter by your incident ID (e.g., `INC-20261025211310-8D9525`).
+3. Confirm that two snapshots exist:
+   * The initial crash-consistent point-in-time snapshot.
+   * The vault copy re-encrypted with your dedicated KMS CMK (`alias/dfir-forensics-vault-key`).
+
+### Step 5: Download and Review Evidence from the S3 Evidence Vault
+
+1. List the evidence objects in the S3 vault:
+   ```bash
+   aws s3 ls s3://<EVIDENCE_BUCKET_NAME>/evidence/<INCIDENT_ID>/ --recursive
+   ```
+2. Download the live triage package and chain of custody manifest:
+   ```bash
+   aws s3 cp s3://<EVIDENCE_BUCKET_NAME>/evidence/<INCIDENT_ID>/manifest.json .
+   aws s3 cp s3://<EVIDENCE_BUCKET_NAME>/evidence/<INCIDENT_ID>/live_triage/ . --recursive
+   ```
+3. Download the compiled Forensic Triage Report:
+   ```bash
+   aws s3 cp s3://<EVIDENCE_BUCKET_NAME>/evidence/<INCIDENT_ID>/reports/Forensic_Triage_Report.md .
+   ```
+4. View the report containing extracted network sockets, unlinked processes, persistence mechanisms, and MITRE ATT&CK technique classifications.
+
+### Step 6: Teardown Infrastructure
+
+When testing is complete, destroy all provisioned AWS resources to eliminate ongoing charges:
+
+1. Empty all versions and delete markers from the S3 evidence bucket:
+   ```bash
+   python -c "import boto3; s3 = boto3.resource('s3', region_name='us-east-2'); s3.Bucket('<EVIDENCE_BUCKET_NAME>').object_versions.delete()"
+   ```
+2. Navigate to the terraform directory:
+   ```bash
+   cd terraform
+   ```
+3. Run terraform destroy:
+   ```bash
+   terraform destroy -auto-approve -var="aws_region=us-east-2"
+   ```
