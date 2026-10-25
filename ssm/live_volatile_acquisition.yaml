@@ -1,0 +1,101 @@
+schemaVersion: '2.2'
+description: 'AWS Cloud DFIR: Live Volatile State & Volatile Memory Acquisition (RFC 3227 Order of Volatility)'
+parameters:
+  EvidenceBucket:
+    type: String
+    description: 'Target S3 bucket for evidence vault'
+  IncidentId:
+    type: String
+    description: 'Unique Incident Response Tracking ID'
+  KmsKeyId:
+    type: String
+    description: 'Forensics KMS Key ID for S3 client-side/server-side encryption'
+mainSteps:
+  - action: aws:runShellScript
+    name: CollectVolatileSystemState
+    inputs:
+      timeoutSeconds: '300'
+      runCommand:
+        - |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          INCIDENT_ID="{{ IncidentId }}"
+          BUCKET="{{ EvidenceBucket }}"
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          WORK_DIR="/tmp/dfir_${INCIDENT_ID}_live"
+          mkdir -p "${WORK_DIR}"
+          cd "${WORK_DIR}"
+
+          echo "[+] Step 1: Collecting Network Connections..."
+          ss -tlpn > "netstat_listening.txt" 2>&1 || true
+          ss -teapn > "netstat_all.txt" 2>&1 || true
+          lsof -i -n -P > "lsof_network.txt" 2>&1 || true
+          ip route show > "ip_routes.txt" 2>&1 || true
+          arp -an > "arp_table.txt" 2>&1 || true
+
+          echo "[+] Step 2: Collecting Running Processes & Parent-Child Tree..."
+          ps auxwwjf > "process_tree.txt" 2>&1 || true
+          ps -eo pid,ppid,user,args > "ps_standard.txt" 2>&1 || true
+          # Detect running processes executing from deleted binaries (common malware stealth)
+          ls -l /proc/*/exe 2>/dev/null | grep '(deleted)' > "processes_running_from_deleted_binaries.txt" || true
+
+          echo "[+] Step 3: Collecting Kernel Modules & Drivers..."
+          lsmod > "kernel_modules.txt" 2>&1 || true
+          uname -a > "system_kernel_info.txt" 2>&1 || true
+
+          echo "[+] Step 4: Collecting Active Sessions & Persistence Artifacts..."
+          w > "logged_in_users.txt" 2>&1 || true
+          last -n 50 > "login_history.txt" 2>&1 || true
+          crontab -l > "root_crontab.txt" 2>&1 || true
+          ls -la /etc/cron* /var/spool/cron/crontabs > "system_cron_directory.txt" 2>&1 || true
+          systemctl list-timers --all > "systemd_timers.txt" 2>&1 || true
+
+          echo "[+] Step 5: Packaging & Integrity Hashing..."
+          tar -czf "live_triage_${INCIDENT_ID}_${TIMESTAMP}.tar.gz" *.txt
+          sha256sum "live_triage_${INCIDENT_ID}_${TIMESTAMP}.tar.gz" > "live_triage_${INCIDENT_ID}_${TIMESTAMP}.tar.gz.sha256"
+
+          echo "[+] Step 6: Direct Upload to S3 Evidence Vault..."
+          aws s3 cp "live_triage_${INCIDENT_ID}_${TIMESTAMP}.tar.gz" "s3://${BUCKET}/evidence/${INCIDENT_ID}/live_triage/" --sse aws:kms --sse-kms-key-id "{{ KmsKeyId }}"
+          aws s3 cp "live_triage_${INCIDENT_ID}_${TIMESTAMP}.tar.gz.sha256" "s3://${BUCKET}/evidence/${INCIDENT_ID}/live_triage/" --sse aws:kms --sse-kms-key-id "{{ KmsKeyId }}"
+
+          # Cleanup local scratch files to preserve disk state
+          rm -rf "${WORK_DIR}"
+          echo "[✓] Volatile System State Acquired & Transferred Successfully."
+
+  - action: aws:runShellScript
+    name: AcquireVolatileMemory
+    inputs:
+      timeoutSeconds: '1200'
+      runCommand:
+        - |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          INCIDENT_ID="{{ IncidentId }}"
+          BUCKET="{{ EvidenceBucket }}"
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          WORK_DIR="/tmp/dfir_${INCIDENT_ID}_mem"
+          mkdir -p "${WORK_DIR}"
+          cd "${WORK_DIR}"
+
+          echo "[+] Step 1: Downloading Statically Linked AVML (Acquire Volatile Memory for Linux)..."
+          # Download official release of Microsoft AVML
+          AVML_URL="https://github.com/microsoft/avml/releases/download/v0.14.0/avml"
+          curl -sSL -o avml "${AVML_URL}" || wget -q -O avml "${AVML_URL}"
+          chmod +x avml
+
+          echo "[+] Step 2: Dumping Volatile RAM to Compressed Image..."
+          MEM_FILE="memory_${INCIDENT_ID}_${TIMESTAMP}.lime.gz"
+          # AVML directly produces LiME format with gzip compression
+          ./avml --compress "${MEM_FILE}"
+
+          echo "[+] Step 3: Computing Cryptographic Checksum (SHA-256 Chain of Custody)..."
+          sha256sum "${MEM_FILE}" > "${MEM_FILE}.sha256"
+          cat "${MEM_FILE}.sha256"
+
+          echo "[+] Step 4: Streaming Memory Image to Encrypted S3 Evidence Vault..."
+          aws s3 cp "${MEM_FILE}" "s3://${BUCKET}/evidence/${INCIDENT_ID}/memory/" --sse aws:kms --sse-kms-key-id "{{ KmsKeyId }}"
+          aws s3 cp "${MEM_FILE}.sha256" "s3://${BUCKET}/evidence/${INCIDENT_ID}/memory/" --sse aws:kms --sse-kms-key-id "{{ KmsKeyId }}"
+
+          echo "[+] Step 5: Secure Wipe of Local Staging Directory..."
+          rm -rf "${WORK_DIR}"
+          echo "[✓] Volatile RAM Acquisition Complete."
