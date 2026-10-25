@@ -65,24 +65,9 @@ flowchart TD
 5. Disk Preservation & KMS Re-Encryption: The third Lambda function creates point-in-time crash-consistent EBS snapshots of all block devices attached to the host. The fourth Lambda function waits for the snapshot to reach the completed state, then creates an encrypted copy using the dedicated Forensics KMS Customer Managed Key (`alias/dfir-forensics-vault-key`). This ensures that source account administrators or compromised credentials cannot delete or read the disk evidence.
 6. Forensics Worker & MITRE Mapping: The fifth Lambda invokes the Volatility 3 analysis worker. The worker analyzes process tables (`linux.pslist`), injected code segments (`linux.malfind`), and network sockets (`linux.sockstat`). Findings are correlated with live artifact records and mapped to corresponding MITRE ATT&CK techniques. The finalized `Forensic_Triage_Report.md` and `Forensic_Triage_Report.json` documents are deposited in the S3 evidence vault under the incident tracking identifier.
 
-### Production Execution Proof & Live Incident Report
+### Verified Incident Execution Report
 
-A comprehensive, end-to-end case study of a verified incident response triage run is documented in the full [Forensic Incident Response Report: INC-20261025211310-8D9525](INCIDENT_REPORT.md), detailing execution timelines, memory capture telemetry, root cause analysis, and remediation actions.
-
-#### Step Functions Execution Workflow
-The following execution graph displays a completed end-to-end incident response run across all sequential containment and forensics phases:
-
-![AWS Step Functions Execution Graph](docs/images/step_functions_execution.png)
-
-#### Zero-Trust Host Quarantine and Custody Tagging
-The following console view displays the target instance after containment, showing active quarantine tags and preserved network parameters:
-
-![EC2 Instance Zero-Trust Quarantine Tags](docs/images/ec2_quarantine_tags.png)
-
-#### Forensics KMS Re-Encrypted EBS Snapshots
-The following console view displays the original crash-consistent snapshot alongside the re-encrypted forensics vault snapshot:
-
-![EBS Snapshots and Encrypted Vault](docs/images/ebs_snapshots_vault.png)
+A complete case study of a verified incident response run on AWS—including execution timelines, memory capture telemetry, console verification, and root cause analysis—is documented in the [Forensic Incident Response Report: INC-20261025211310-8D9525](INCIDENT_REPORT.md).
 
 ---
 
@@ -159,7 +144,7 @@ Terraform outputs will display the resource identifiers upon completion:
 
 ---
 
-## How to Use the App
+## Running an Investigation
 
 ### Step 1: Attach the IAM Instance Profile to Monitored EC2 Hosts
 
