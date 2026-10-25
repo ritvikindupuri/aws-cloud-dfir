@@ -55,6 +55,22 @@ flowchart TD
 
 ---
 
+## 📸 Live AWS Verification & Production Proof
+
+### 1. Autonomous Step Functions Orchestrator (RFC 3227 Order of Volatility)
+Execution graph demonstrating autonomous execution through all containment and forensic preservation phases with 100% success:
+![AWS Step Functions Execution Graph](docs/images/step_functions_execution.png)
+
+### 2. Zero-Trust Dynamic Quarantine & Chain of Custody Tagging
+Automated network quarantine swapping security groups and annotating host with forensic custody metadata:
+![EC2 Instance Zero-Trust Quarantine Tags](docs/images/ec2_quarantine_tags.png)
+
+### 3. Crash-Consistent & Forensics KMS Re-Encrypted EBS Snapshots
+EBS disk snapshots created and re-encrypted under isolated Customer Managed Key (CMK):
+![EBS Snapshots and Encrypted Vault](docs/images/ebs_snapshots_vault.png)
+
+---
+
 ## 🔑 Key Engineering Capabilities
 
 1. **Direct Memory Streaming (Zero Disk Stomping)**:
