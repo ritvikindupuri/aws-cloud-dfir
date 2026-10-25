@@ -1,47 +1,15 @@
 flowchart TD
-  GD["Amazon GuardDuty<br/>Instance finding · severity 7.0–8.9"] --> EB["EventBridge rule<br/>aws.guardduty · GuardDuty Finding"]
-  CLI["trigger_investigation.py<br/>instance_id + reason"] --> SFN["Step Functions<br/>linear · no Catch / Retry"]
-  EB --> SFN
+  N1["1 Start investigation<br/>GuardDuty or CLI"] --> N2["2 Step Functions<br/>linear orchestrator"]
+  N2 --> N3["3 Live capture<br/>SSM · AVML"]
+  N3 --> N4["4 Wait 60 seconds"]
+  N4 --> N5["5 Quarantine host"]
+  N5 --> N6["6 Snapshot EBS"]
+  N6 --> N7["7 Re-encrypt vault"]
+  N7 --> N8["8 Schedule analysis"]
+  N8 --> N9["9 S3 evidence vault"]
+  N9 -.-> N10["Fargate · Volatility<br/>not deployed"]
 
-  SFN --> T1["TriggerLiveCapture<br/>Lambda trigger-triage"]
-  T1 -->|"no instance_id"| FAIL["Execution fails"]
-  T1 -->|"manifest.json"| S3["S3 evidence vault<br/>SSE-KMS · object lock enabled"]
-  T1 -->|"ssm.send_command"| SSM["SSM CloudDFIR-LiveVolatileAcquisition"]
-  T1 --> W["WaitDuringVolatileAcquisition<br/>60 seconds · does not poll SSM"]
-
-  SSM --> LIVE["CollectVolatileSystemState<br/>ss · lsof -i · ps · lsmod · cron"]
-  LIVE -->|"tar.gz + SHA-256"| S3
-  LIVE --> RAM["AcquireVolatileMemory<br/>AVML v0.14.0 · /var/tmp"]
-  RAM -->|".lime.gz + SHA-256"| S3
-
-  W --> Q["EnforceNetworkQuarantine<br/>Lambda isolate-instance"]
-  Q -->|"DisableApiTermination error"| WARN["warn and continue"]
-  Q --> SNAP["SnapshotEBSVolumes<br/>Lambda snapshot-ebs"]
-  SNAP --> RE["ReencryptForensicsVault<br/>Lambda reencrypt-evidence"]
-  RE -->|"snapshot waiter / manifest error"| WARN
-  RE -->|"CopySnapshot + forensics KMS CMK"| S3
-  RE --> AN["TriggerForensicAnalysis<br/>Lambda run-volatility"]
-  AN -->|"ECS_CLUSTER and TASK_DEFINITION empty · deployed path"| DONE["ForensicInvestigationComplete"]
-  AN -.->|"only if both ECS env vars are set"| ECS["Fargate dfir-analyzer<br/>Volatility 3 + MITRE report"]
-  AN -->|"ecs.run_task error"| WARN
-  ECS --> S3
-  ECS --> DONE
-
-  classDef detect fill:#1565C0,color:#fff,stroke:#0D47A1
-  classDef orch fill:#6A1B9A,color:#fff,stroke:#4A148C
-  classDef acq fill:#EF6C00,color:#fff,stroke:#E65100
-  classDef iso fill:#C62828,color:#fff,stroke:#8E0000
-  classDef disk fill:#00838F,color:#fff,stroke:#006064
-  classDef anal fill:#2E7D32,color:#fff,stroke:#1B5E20
-  classDef store fill:#37474F,color:#fff,stroke:#263238
-  classDef err fill:#B71C1C,color:#fff,stroke:#7F0000
-  classDef warn fill:#EF6C00,color:#fff,stroke:#E65100
-  class GD,EB,CLI detect
-  class SFN,W,DONE orch
-  class T1,SSM,LIVE,RAM acq
-  class Q iso
-  class SNAP,RE disk
-  class AN,ECS anal
-  class S3 store
-  class FAIL err
-  class WARN warn
+  classDef aws fill:#1565C0,color:#fff,stroke:#0D47A1
+  classDef opt fill:#fff,color:#1084FE,stroke:#1084FE,stroke-dasharray: 5 5
+  class N1,N2,N3,N4,N5,N6,N7,N8,N9 aws
+  class N10 opt

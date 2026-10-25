@@ -23,73 +23,35 @@ AWS Cloud DFIR is an enterprise-grade digital forensics and incident response au
 </p>
 <p align="center"><b>Figure 1. How the AWS Cloud DFIR pipeline works</b></p>
 
-Official AWS Architecture Icons mark every AWS service and resource. Official Docker, Microsoft (AVML), and Volatility Foundation marks are used on those products. The CLI, memory dump file, and reports use AWS general resource icons (Client, Document) because they are not standalone AWS services.
-
 <details>
 <summary><b>Mermaid source for the same flow</b></summary>
 
 ```mermaid
 flowchart TD
-  GD["Amazon GuardDuty<br/>Instance finding · severity 7.0–8.9"] --> EB["EventBridge rule<br/>aws.guardduty · GuardDuty Finding"]
-  CLI["trigger_investigation.py<br/>instance_id + reason"] --> SFN["Step Functions<br/>linear · no Catch / Retry"]
-  EB --> SFN
-
-  SFN --> T1["TriggerLiveCapture<br/>Lambda trigger-triage"]
-  T1 -->|"no instance_id"| FAIL["Execution fails"]
-  T1 -->|"manifest.json"| S3["S3 evidence vault<br/>SSE-KMS · object lock enabled"]
-  T1 -->|"ssm.send_command"| SSM["SSM CloudDFIR-LiveVolatileAcquisition"]
-  T1 --> W["WaitDuringVolatileAcquisition<br/>60 seconds · does not poll SSM"]
-
-  SSM --> LIVE["CollectVolatileSystemState<br/>ss · lsof -i · ps · lsmod · cron"]
-  LIVE -->|"tar.gz + SHA-256"| S3
-  LIVE --> RAM["AcquireVolatileMemory<br/>AVML v0.14.0 · /var/tmp"]
-  RAM -->|".lime.gz + SHA-256"| S3
-
-  W --> Q["EnforceNetworkQuarantine<br/>Lambda isolate-instance"]
-  Q -->|"DisableApiTermination error"| WARN["warn and continue"]
-  Q --> SNAP["SnapshotEBSVolumes<br/>Lambda snapshot-ebs"]
-  SNAP --> RE["ReencryptForensicsVault<br/>Lambda reencrypt-evidence"]
-  RE -->|"snapshot waiter / manifest error"| WARN
-  RE -->|"CopySnapshot + forensics KMS CMK"| S3
-  RE --> AN["TriggerForensicAnalysis<br/>Lambda run-volatility"]
-  AN -->|"ECS_CLUSTER and TASK_DEFINITION empty · deployed path"| DONE["ForensicInvestigationComplete"]
-  AN -.->|"only if both ECS env vars are set"| ECS["Fargate dfir-analyzer<br/>Volatility 3 + MITRE report"]
-  AN -->|"ecs.run_task error"| WARN
-  ECS --> S3
-  ECS --> DONE
-
-  classDef detect fill:#1565C0,color:#fff,stroke:#0D47A1
-  classDef orch fill:#6A1B9A,color:#fff,stroke:#4A148C
-  classDef acq fill:#EF6C00,color:#fff,stroke:#E65100
-  classDef iso fill:#C62828,color:#fff,stroke:#8E0000
-  classDef disk fill:#00838F,color:#fff,stroke:#006064
-  classDef anal fill:#2E7D32,color:#fff,stroke:#1B5E20
-  classDef store fill:#37474F,color:#fff,stroke:#263238
-  classDef err fill:#B71C1C,color:#fff,stroke:#7F0000
-  classDef warn fill:#EF6C00,color:#fff,stroke:#E65100
-  class GD,EB,CLI detect
-  class SFN,W,DONE orch
-  class T1,SSM,LIVE,RAM acq
-  class Q iso
-  class SNAP,RE disk
-  class AN,ECS anal
-  class S3 store
-  class FAIL err
-  class WARN warn
+  N1["1 Start investigation<br/>GuardDuty or CLI"] --> N2["2 Step Functions<br/>linear orchestrator"]
+  N2 --> N3["3 Live capture<br/>SSM · AVML"]
+  N3 --> N4["4 Wait 60 seconds"]
+  N4 --> N5["5 Quarantine host"]
+  N5 --> N6["6 Snapshot EBS"]
+  N6 --> N7["7 Re-encrypt vault"]
+  N7 --> N8["8 Schedule analysis"]
+  N8 --> N9["9 S3 evidence vault"]
+  N9 -.-> N10["Fargate · Volatility<br/>not deployed"]
 ```
 
 </details>
 
 ### How it works, step by step
 
-1. **A GuardDuty Instance finding (severity 7.0–8.9) or the CLI starts the state machine.** The EventBridge rule `cloud-dfir-orchestrator-guardduty-finding` matches `source=aws.guardduty`, `detail-type=GuardDuty Finding`, `resource.resourceType=Instance`, and severity 7.0–8.9, then calls `states:StartExecution` with the raw event. There is no Security Hub rule and no input transformer. `trigger_investigation.py` finds a state machine whose name contains `cloud-dfir` and starts it with `{instance_id, reason, triggered_by, timestamp}`.
-2. **TriggerLiveCapture (Lambda `trigger-triage`) parses the instance, writes the chain-of-custody manifest, and sends the SSM command.** The GuardDuty path reads `detail.resource.instanceDetails.instanceId` and `detail.type`. The CLI path reads `event["instance_id"]` and `event["reason"]`. A missing instance id raises `ValueError` and fails the execution — the state machine has no Catch or Retry. `DescribeInstances` records VPC, subnet, security groups, and EBS mappings. `evidence/{INC}/manifest.json` is written with SSE-KMS. Then `ssm.send_command` runs `CloudDFIR-LiveVolatileAcquisition` (`TimeoutSeconds` 1500).
-3. **On the instance, the SSM document runs two sequential shell steps in `/var/tmp`. Step Functions does not join that command.** `CollectVolatileSystemState` captures sockets (`ss`), network `lsof -i` (not a full open-file listing), routes, ARP, the process tree, deleted-binary `exe` links, `lsmod`, logins, crontabs, and systemd timers; packs a `.tar.gz` plus SHA-256; and uploads to `evidence/{INC}/live_triage/`. `AcquireVolatileMemory` then downloads Microsoft AVML v0.14.0, runs `./avml --compress` to a `.lime.gz`, hashes it, uploads to `evidence/{INC}/memory/`, and deletes the scratch directory.
-4. **WaitDuringVolatileAcquisition waits 60 seconds and does not poll SSM.** The state machine continues even if AVML is still running.
-5. **EnforceNetworkQuarantine (Lambda `isolate-instance`) replaces every security group with the quarantine group.** It tries `DisableApiTermination=true` and continues after a warning if that call fails. The quarantine SG has 0 ingress and egress TCP 443 to `0.0.0.0/0` (any HTTPS destination, not SSM endpoints only). Tags set: `DFIR_Status=Quarantined`, `DFIR_IncidentId`, `DFIR_EvidencePreservation=DO_NOT_DELETE`, `DFIR_OriginalSecurityGroups`.
-6. **SnapshotEBSVolumes then ReencryptForensicsVault preserve disk under the forensics CMK.** `snapshot-ebs` calls `create_snapshot` for each volume recorded in step 2 and does not wait. `reencrypt-evidence` waits on `snapshot_completed` (Delay 3, MaxAttempts 40); a waiter error is logged and `copy_snapshot` is still attempted with `Encrypted=true` and `alias/dfir-forensics-vault-key`. The manifest is updated with `ebs_forensic_snapshots` and `completed_stages`: LiveVolatile, NetworkQuarantine, EBSSnapshots, KMSEncryption. A manifest write error is logged; the state still succeeds.
-7. **TriggerForensicAnalysis (Lambda `run-volatility`) records the analysis stage.** Terraform sets `ECS_CLUSTER` and `TASK_DEFINITION` to empty strings, so `ecs.run_task` is not called. The lambda returns `ANALYSIS_SCHEDULED` and `report_s3_prefix=s3://$BUCKET/evidence/{INC}/reports/`. It does not write a report. If both env vars were set, it would start a Fargate task (`dfir-analyzer` / `analyze_memory.py`) that runs Volatility `linux.pslist`, `linux.malfind`, and `linux.sockstat`, maps MITRE techniques from live triage, and uploads `Forensic_Triage_Report.md` and `.json`. That path is not deployed; the lambda role has no `ecs:RunTask`. ECS errors are caught and the state still succeeds.
-8. **ForensicInvestigationComplete succeeds.** The execution output is `{incident_id, status, report_s3_prefix}`. The reports prefix is returned even when no analyzer ran and that prefix is empty.
+1. **Start investigation.** A GuardDuty Instance finding (severity 7.0–8.9) hits the EventBridge rule `cloud-dfir-orchestrator-guardduty-finding` (`source=aws.guardduty` only — no Security Hub rule), or an analyst runs `trigger_investigation.py` with `{instance_id, reason, triggered_by, timestamp}`.
+2. **Step Functions** (`cloud-dfir-orchestrator-state-machine`) is the linear orchestrator. There is no Catch, Retry, or Parallel. A missing instance id in the first Lambda raises `ValueError` and fails the execution.
+3. **Live capture.** Lambda `trigger-triage` writes `evidence/{INC}/manifest.json` (SSE-KMS) and calls `ssm.send_command` on `CloudDFIR-LiveVolatileAcquisition` (`TimeoutSeconds` 1500). On the instance, in `/var/tmp`, the document first collects live state (`ss`, `lsof -i`, processes, modules, cron) into `live_triage/`, then runs Microsoft AVML v0.14.0 (`./avml --compress`) into `memory/`. Step Functions does not join `CommandId`.
+4. **Wait 60 seconds.** `WaitDuringVolatileAcquisition` is a fixed wait. It does not poll SSM, so quarantine can start while AVML is still running.
+5. **Quarantine host.** Lambda `isolate-instance` replaces every security group with the quarantine SG (0 ingress; egress TCP 443 to `0.0.0.0/0`). It tries `DisableApiTermination=true` and continues after a warning if that fails. Tags: `DFIR_Status=Quarantined`, `DFIR_IncidentId`, `DFIR_EvidencePreservation=DO_NOT_DELETE`, `DFIR_OriginalSecurityGroups`.
+6. **Snapshot EBS.** Lambda `snapshot-ebs` calls `create_snapshot` for each volume recorded in step 3. It does not wait for completion.
+7. **Re-encrypt vault.** Lambda `reencrypt-evidence` waits on `snapshot_completed` (Delay 3, MaxAttempts 40), then `copy_snapshot` with `Encrypted=true` and `alias/dfir-forensics-vault-key`. Waiter or manifest errors are logged; the state still succeeds. Manifest `completed_stages`: LiveVolatile, NetworkQuarantine, EBSSnapshots, KMSEncryption.
+8. **Schedule analysis.** Lambda `run-volatility` returns `ANALYSIS_SCHEDULED`. Terraform sets `ECS_CLUSTER` and `TASK_DEFINITION` to empty strings, so Fargate is not launched and no report is written. The lambda role has no `ecs:RunTask`.
+9. **S3 evidence vault.** Objects land under `evidence/{INC}/` (`manifest.json`, `live_triage/`, `memory/`, and `reports/` only if an analyzer ran). SSE-KMS; `object_lock_enabled` is true; no default retention is set. The dashed **Fargate · Volatility** node is not deployed. If both ECS env vars were set, `analyze_memory.py` would run Volatility `linux.pslist` / `malfind` / `sockstat` and upload `Forensic_Triage_Report.md` and `.json`.
 
 ### Verified Incident Execution Report
 
