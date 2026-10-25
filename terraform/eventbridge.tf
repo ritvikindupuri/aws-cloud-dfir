@@ -1,11 +1,11 @@
 # ==============================================================================
-# Real-Time EventBridge Trigger for Authentic GuardDuty & Security Hub Findings
+# Real-Time EventBridge Trigger for High-Severity GuardDuty EC2 Instance Findings
 # (Zero simulation: Triggers natively on genuine AWS security telemetry)
 # ==============================================================================
 
 resource "aws_cloudwatch_event_rule" "guardduty_high_severity" {
   name        = "${var.project_name}-guardduty-finding"
-  description = "Captures authentic high-severity Amazon GuardDuty & Security Hub findings"
+  description = "Captures high-severity Amazon GuardDuty EC2 instance findings"
 
   event_pattern = jsonencode({
     source      = ["aws.guardduty"]

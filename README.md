@@ -12,7 +12,7 @@ AWS Cloud DFIR is an enterprise-grade digital forensics and incident response au
 * Tamper-Proof S3 Evidence Vault (WORM Compliance): Stores forensic archives, memory dumps, and execution logs in an S3 bucket configured with Object Lock in Compliance mode, preventing deletion or modification even by root account credentials.
 * Dedicated Forensics KMS CMK Re-Encryption: Re-encrypts all EBS volume snapshots under an isolated Customer Managed Key with restricted key policies, ensuring compromised workload roles cannot decrypt, manipulate, or delete disk evidence.
 * Automated Volatility 3 Analysis Engine: Integrates automated memory inspection routines (including process listing, malfind code injection detection, and socket analysis) mapped directly to MITRE ATT&CK techniques with Markdown and JSON report outputs.
-* Native EventBridge Detection Hook: Connects natively to Amazon GuardDuty and AWS Security Hub to initiate automated containment and triage immediately upon high-severity alert generation.
+* Native EventBridge Detection Hook: Connects natively to Amazon GuardDuty to initiate automated containment and triage immediately upon high-severity Instance findings.
 
 ---
 
@@ -102,7 +102,7 @@ A complete case study of a verified incident response run on AWS—including exe
 * Threat Mapping: MITRE ATT&CK Matrix for Enterprise
 * Cryptography & Protection: AWS Key Management Service (KMS CMK), SHA-256 Checksums
 * Evidence Storage: Amazon Simple Storage Service (S3) with Object Lock (WORM compliance)
-* Threat Ingestion: Amazon EventBridge, Amazon GuardDuty, AWS Security Hub
+* Threat Ingestion: Amazon EventBridge, Amazon GuardDuty
 
 ---
 
