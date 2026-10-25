@@ -22,7 +22,7 @@ mainSteps:
           INCIDENT_ID="{{ IncidentId }}"
           BUCKET="{{ EvidenceBucket }}"
           TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
-          WORK_DIR="/tmp/dfir_${INCIDENT_ID}_live"
+          WORK_DIR="/var/tmp/dfir_${INCIDENT_ID}_live"
           mkdir -p "${WORK_DIR}"
           cd "${WORK_DIR}"
 
@@ -73,7 +73,7 @@ mainSteps:
           INCIDENT_ID="{{ IncidentId }}"
           BUCKET="{{ EvidenceBucket }}"
           TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
-          WORK_DIR="/tmp/dfir_${INCIDENT_ID}_mem"
+          WORK_DIR="/var/tmp/dfir_${INCIDENT_ID}_mem"
           mkdir -p "${WORK_DIR}"
           cd "${WORK_DIR}"
 

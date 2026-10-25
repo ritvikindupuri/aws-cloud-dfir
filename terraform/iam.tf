@@ -157,7 +157,8 @@ resource "aws_iam_role_policy" "ec2_evidence_upload" {
       {
         Effect = "Allow"
         Action = [
-          "s3:PutObject"
+          "s3:PutObject",
+          "s3:AbortMultipartUpload"
         ]
         Resource = [
           "${aws_s3_bucket.evidence_vault.arn}/evidence/*"
@@ -167,7 +168,9 @@ resource "aws_iam_role_policy" "ec2_evidence_upload" {
         Effect = "Allow"
         Action = [
           "kms:Encrypt",
-          "kms:GenerateDataKey*"
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
         ]
         Resource = [aws_kms_key.forensics_key.arn]
       }

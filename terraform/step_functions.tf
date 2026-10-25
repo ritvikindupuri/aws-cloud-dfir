@@ -26,7 +26,7 @@ resource "aws_sfn_state_machine" "cloud_dfir_pipeline" {
 
       WaitDuringVolatileAcquisition = {
         Type    = "Wait"
-        Seconds = 30
+        Seconds = 60
         Next    = "EnforceNetworkQuarantine"
       }
 
