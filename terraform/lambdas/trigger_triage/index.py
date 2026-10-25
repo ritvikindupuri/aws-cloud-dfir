@@ -14,7 +14,7 @@ SSM_DOCUMENT_NAME = os.environ.get('SSM_DOCUMENT_NAME')
 
 def handler(event, context):
     """
-    Step 1: Ingests alert (GuardDuty, SecurityHub, or manual), generates Chain of Custody ID,
+    Step 1: Ingests alert (GuardDuty or manual), generates Chain of Custody ID,
     records target instance topology, and triggers live volatile capture via SSM.
     """
     print("Received event:", json.dumps(event))
