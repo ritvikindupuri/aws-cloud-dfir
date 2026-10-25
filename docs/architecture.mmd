@@ -1,15 +1,27 @@
-flowchart TD
-  N1["1 Start investigation<br/>GuardDuty or CLI"] --> N2["2 Step Functions<br/>linear orchestrator"]
-  N2 --> N3["3 Live capture<br/>SSM · AVML"]
-  N3 --> N4["4 Wait 60 seconds"]
-  N4 --> N5["5 Quarantine host"]
-  N5 --> N6["6 Snapshot EBS"]
-  N6 --> N7["7 Re-encrypt vault"]
-  N7 --> N8["8 Schedule analysis"]
-  N8 --> N9["9 S3 evidence vault"]
-  N9 -.-> N10["Fargate · Volatility<br/>not deployed"]
-
-  classDef aws fill:#1565C0,color:#fff,stroke:#0D47A1
-  classDef opt fill:#fff,color:#1084FE,stroke:#1084FE,stroke-dasharray: 5 5
-  class N1,N2,N3,N4,N5,N6,N7,N8,N9 aws
-  class N10 opt
+flowchart LR
+  subgraph T["TRIGGER"]
+    GD["GuardDuty"] --> EB["EventBridge"]
+    CLI["Analyst CLI"]
+  end
+  subgraph O["ORCHESTRATE"]
+    SFN["Step Functions"]
+  end
+  subgraph A["ACQUIRE & CONTAIN"]
+    LIVE["Live capture<br/>SSM · AVML"]
+    QUAR["Quarantine host"]
+    SNAP["Snapshot EBS"]
+  end
+  subgraph P["PRESERVE"]
+    S3["S3 evidence vault"]
+    KMS["KMS CMK copy"]
+    FV["Fargate · Volatility"]
+  end
+  EB --> SFN
+  CLI --> SFN
+  SFN --> LIVE
+  LIVE --> S3
+  SFN --> QUAR
+  SFN --> SNAP
+  SNAP --> KMS
+  KMS --> S3
+  S3 -.-> FV
